@@ -2,8 +2,11 @@ package ruigo
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
+
+	json "github.com/json-iterator/go"
 )
 
 type Context struct {
@@ -32,6 +35,15 @@ func (c *Context) String(statusCode int, msg string) {
 	c.Response.Write([]byte(msg))
 }
 
+func (c *Context) JSON(statusCode int, v interface{}) {
+	c.Response.WriteHeader(statusCode)
+	b, err := json.Marshal(v)
+	if err != nil {
+		c.String(500, "")
+	}
+	c.Response.Write(b)
+}
+
 type HandleFunc func(*Context)
 
 type route struct {
@@ -53,18 +65,18 @@ func (r *route) Add(method, path string, handle HandleFunc) {
 
 func (r *route) handler(c *Context) {
 	key := c.Method + "-" + c.Path
+	log.Println("[INFO]: Rrequest path :", key)
 	for i, handlefunc := range r.handle {
-		t, err := regexp.Match(i, []byte(key))
+		t, err := regexp.MatchString(i, key)
 		if err != nil || !t {
-			c.String(http.StatusNotFound, fmt.Sprintf("404 NOT FOUND: %s\n", c.Path))
+			continue
 		}
 		handlefunc(c)
+		return
 	}
-	if handler, ok := r.handle[key]; ok {
-		handler(c)
-	} else {
-		c.String(http.StatusNotFound, fmt.Sprintf("404 NOT FOUND: %s\n", c.Path))
-	}
+
+	c.String(http.StatusNotFound, fmt.Sprintf("404 NOT FOUND: %s\n", c.Path))
+
 }
 
 type Server struct {
