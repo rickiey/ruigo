@@ -1,12 +1,10 @@
 package ruigo
 
 import (
-	"fmt"
+	json "github.com/json-iterator/go"
 	"log"
 	"net/http"
 	"regexp"
-
-	json "github.com/json-iterator/go"
 )
 
 type Context struct {
@@ -46,36 +44,69 @@ func (c *Context) JSON(statusCode int, v interface{}) {
 
 type HandleFunc func(*Context)
 
+type HandleSet struct {
+	method []string
+	hd     HandleFunc
+}
+
 type route struct {
-	handle map[string]HandleFunc
+	handle map[string]HandleSet
 }
 
 func newRoute() *route {
-	m := make(map[string]HandleFunc)
+	m := make(map[string]HandleSet)
 	return &route{m}
 }
 
-func (r *route) Add(method, path string, handle HandleFunc) {
-	k := method + "-" + path
-	if _, ok := r.handle[k]; ok {
+var METHODS = map[string]bool{
+	http.MethodGet:     true,
+	http.MethodPost:    true,
+	http.MethodPatch:   true,
+	http.MethodDelete:  true,
+	http.MethodConnect: true,
+	http.MethodHead:    true,
+	http.MethodOptions: true,
+	http.MethodPut:     true,
+	http.MethodTrace:   true,
+}
+
+func (r *route) Add(method []string, path string, handle HandleFunc) {
+	for _, v := range method {
+		if _, ok := METHODS[v]; !ok {
+			log.Panicf("unsupport http method %v ; it is one of  GET POST PUT DELETE HEAD TRACE OPTIONS CONNECT PATCH \n", v)
+		}
+	}
+	ok, err := regexp.MatchString("^/[A-Za-z1-9/_-]+$", path)
+	if err != nil {
+		log.Panicln("match path error :", err)
+	}
+	if !ok {
+		log.Panicln("path not in compliance : ", path)
+	}
+	k := HandleSet{
+		method: method,
+		hd:     handle,
+	}
+	if _, ok := r.handle[path]; ok {
 		panic("route :  path conflict :" + path)
 	}
-	r.handle[k] = handle
+	r.handle[path] = k
 }
 
 func (r *route) handler(c *Context) {
-	key := c.Method + "-" + c.Path
-	log.Println("[INFO]: Rrequest path :", key)
-	for i, handlefunc := range r.handle {
-		t, err := regexp.MatchString(i, key)
-		if err != nil || !t {
-			continue
-		}
-		handlefunc(c)
+
+	hs, ok := r.handle[c.Path]
+	if !ok {
+		c.Response.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	c.String(http.StatusNotFound, fmt.Sprintf("404 NOT FOUND: %s\n", c.Path))
+	for _, v := range hs.method {
+		if c.Method == v {
+			hs.hd(c)
+		}
+	}
+	c.Response.WriteHeader(http.StatusMethodNotAllowed)
+	return
 
 }
 
